@@ -4,7 +4,7 @@ library(stringr)
 library(tidyr)
 
 getwd()
-setwd("D:/Project/AI_class/R_Project_data")
+# setwd("D:/Project/AI_class/R_Project_data")
 
 ################################################################################
 ############################# 인프라 ###########################################
