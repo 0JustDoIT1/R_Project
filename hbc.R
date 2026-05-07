@@ -4,6 +4,7 @@ library(stringr)
 library(tidyr)
 
 getwd()
+setwd("D:/Project/AI_class/R_Project_data")
 
 ################################################################################
 ############################# 인프라 ###########################################
@@ -14,11 +15,54 @@ str(infra_hospital)
 head(infra_hospital)
 colSums(is.na(infra_hospital))
 
-infra_amb <- read.csv("구급차.csv", fileEncoding = "UTF-8")
+infra_amb <- read.csv("구급차 수.csv", fileEncoding = "UTF-8")
 infra_amb <- infra_amb %>% rename(infra_amb="구급차.수")
 str(infra_amb)
 head(infra_amb)
 colSums(is.na(infra_amb))
+
+infra_people <- read.csv("인구수.csv", fileEncoding = "UTF-8")
+infra_people <- infra_people %>% rename(infra_people="총인구수")
+str(infra_people)
+head(infra_people)
+colSums(is.na(infra_people))
+
+infra_area <- read.csv("지역면적.csv", fileEncoding = "UTF-8")
+infra_area <- infra_area %>% rename(infra_area="면적")
+str(infra_area)
+head(infra_area)
+colSums(is.na(infra_area))
+
+# 인구수, 면적 데이터 먼저 합치기
+infra_base <- infra_people %>%
+  left_join(infra_area, by = c("분류", "항목"))
+
+# 응급기관 수, 구급차 수 합치기
+infra_all <- infra_hospital %>%
+  left_join(infra_amb, by = c("분류", "항목")) %>%
+  left_join(infra_base, by = c("분류", "항목"))
+
+# 인구 10만명당 + 면적(km²)당 비율 계산
+infra_all <- infra_all %>%
+  mutate(
+    # 인구 10만명당
+    infra_hospital_per100k = infra_hospital / infra_people * 100000,
+    infra_amb_per100k      = infra_amb / infra_people * 100000,
+    
+    # 면적(km²)당
+    infra_hospital_per_area = infra_hospital / infra_area,
+    infra_amb_per_area      = infra_amb / infra_area
+  )
+
+# 비율 값만 남기기기
+infra_all <- infra_all %>%
+  dplyr::select(분류, 항목,
+                infra_hospital_per100k, infra_amb_per100k,
+                infra_hospital_per_area, infra_amb_per_area)
+
+str(infra_all)
+head(infra_all)
+colSums(is.na(infra_all))
 
 ################################################################################
 ############################### 의료 ###########################################
@@ -50,7 +94,7 @@ colSums(is.na(ami_dead))
 ################################################################################
 ############################### 지역구조 #######################################
 ################################################################################
-region_old <- read.csv("고령화.csv", fileEncoding = "UTF-8")
+region_old <- read.csv("고령화률.csv", fileEncoding = "UTF-8")
 region_old <- region_old %>% rename(region_old="비율")
 str(region_old)
 head(region_old)
@@ -60,8 +104,7 @@ colSums(is.na(region_old))
 ############################# 2차 전처리 #######################################
 ################################################################################
 # 카테고리별로 나누어진 데이터 하나로 최종 합치기
-final_data <- infra_hospital %>%
-  inner_join(infra_amb, by=c("분류","항목")) %>% 
+final_data <- infra_all %>% 
   inner_join(ami_amb, by=c("분류","항목")) %>% 
   inner_join(ami_heal, by=c("분류","항목")) %>% 
   inner_join(ami_trans, by=c("분류","항목")) %>% 
@@ -91,3 +134,4 @@ str(final_data)
 
 # 파일로 추출
 write.csv(final_data, "final_data.csv", row.names = FALSE, fileEncoding = "CP949")
+
