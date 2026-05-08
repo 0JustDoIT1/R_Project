@@ -36,7 +36,7 @@ summary(data[, c("infra_hospital_per100k", "infra_amb_per100k")])
 par(mfrow = c(2,2))
 hist(data$infra_hospital_per100k, main="병원 수 (per100k)", col = "steelblue")
 hist(data$infra_amb_per100k, main="구급차 수 (per100k)", col = "steelblue")
-boxplot(data$infra_amb_per100k, main="병원 수 (per100k)")
+boxplot(data$infra_hospital_per100k, main="병원 수 (per100k)")
 boxplot(data$infra_amb_per100k, main="구급차 수 (per100k)")
 par(mfrow = c(1,1))
 
@@ -67,7 +67,7 @@ cohen.d(infra_hospital_per100k ~ metro, data = data)
   # d estimate: 0.7098288 (medium) : 비수도권 - 수도권
   # 비수도권 > 수도권
 cohen.d(infra_amb_per100k ~ metro, data = data)
-  # d estimate: 0.9778843 (large) : 수도권 - 비수도권
+  # d estimate: 0.9778843 (large) : 비수도권 - 수도권
   # 비수도권 > 수도권
 
 # 그룹별 중앙값 확인 (Wilcoxon은 중앙값 기준)
@@ -162,7 +162,28 @@ data %>%
 ##### 배치 최적화와 접근성 개선이 우선 과제로 예상
 
 # 결과 시각화
-# 면적당 수치 중앙값 기준으로
+# 인구당 시각화
+data %>%
+  group_by(metro) %>%
+  summarise(
+    병원  = median(infra_hospital_per100k),
+    구급차 = median(infra_amb_per100k)
+  ) %>%
+  pivot_longer(-metro, names_to = "변수", values_to = "중앙값") %>%
+  ggplot(aes(x = 변수, y = 중앙값, fill = metro)) +
+  geom_col(position = "dodge", width = .5, alpha = .85) +
+  geom_text(aes(label = round(중앙값, 4)),
+            position = position_dodge(.5), vjust = -.5, size = 4) +
+  scale_fill_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "인구당 응급 인프라 — 수도권 vs 비수도권",
+       subtitle = "비수도권이 병원 2.5배 / 구급차 3.6배 높음",
+       x = NULL, y = "중앙값", fill = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold"),
+        plot.subtitle   = element_text(color = "grey50"))
+
+# 면적당 시각화
 data %>%
   group_by(metro) %>%
   summarise(
@@ -226,7 +247,7 @@ cor.test(data$region_old, data$infra_amb_per_area, method = "spearman", exact = 
 
 # 고령화율 ↔ 사망률
 cor.test(data$region_old, data$ami_dead, method = "spearman", exact = FALSE)
-  # p-value = 0.3121, rho = -0.064 (거의 없음)
+  # p-value = 0.1187, rho = -0.09894509 (거의 없음)
   # 귀무가설 기각 실패 : 고령화율과 사망률 사이에 관계가 없음
 
 ### 결론
@@ -289,31 +310,7 @@ summary(m_trans)
 
 # 각 모델의 설명력이 매우 낮음
 # 두 인프라 변수 모두 귀무가설 기각 실패 : 인프라가 치료 역량에 유의한 영향 없음
-# 이는 예상과는 다른 결과로 존재하는 데이터 자체가 설명력이 부족하거나,
-# 전체 데이터를 통해 판단했기 때문일 수도 있음
-# 이를 판단하기 위해 수도권/비수도권으로 층화해서 각각 진행
-
-# 데이터 분리
-data_metro    <- data %>% filter(metro == "수도권")
-data_nonmetro <- data %>% filter(metro == "비수도권")
-
-# 수도권 회귀
-m_amb_metro    <- lm(ami_amb   ~ infra_hospital_per_area + infra_amb_per_area + region_old, data = data_metro)
-m_heal_metro   <- lm(ami_heal  ~ infra_hospital_per_area + infra_amb_per_area + region_old, data = data_metro)
-m_trans_metro  <- lm(ami_trans ~ infra_hospital_per_area + infra_amb_per_area + region_old, data = data_metro)
-
-summary(m_amb_metro)
-summary(m_heal_metro)
-summary(m_trans_metro)
-
-# 비수도권 회귀
-m_amb_nonmetro   <- lm(ami_amb   ~ infra_hospital_per_area + infra_amb_per_area + region_old, data = data_nonmetro)
-m_heal_nonmetro  <- lm(ami_heal  ~ infra_hospital_per_area + infra_amb_per_area + region_old, data = data_nonmetro)
-m_trans_nonmetro <- lm(ami_trans ~ infra_hospital_per_area + infra_amb_per_area + region_old, data = data_nonmetro)
-
-summary(m_amb_nonmetro)
-summary(m_heal_nonmetro)
-summary(m_trans_nonmetro)
+# 이는 예상과는 다른 결과로 존재하는 데이터 자체가 설명력이 부족
 
 # 구급차 이용률
 # 수도권: 병원 수↑ → 구급차 이용률↓, 구급차 수↑ → 구급차 이용률↑ (유의)
@@ -327,34 +324,34 @@ summary(m_trans_nonmetro)
 # 수도권/비수도권 모두 비유의
 # 전원율도 인프라로 설명이 안 됨
 
-# 세 모델 계수 추출
-coef_all <- bind_rows(
-  tidy(m_amb,   conf.int = TRUE) %>% mutate(model = "구급차 이용률"),
-  tidy(m_heal,  conf.int = TRUE) %>% mutate(model = "입원치료 제공률"),
-  tidy(m_trans, conf.int = TRUE) %>% mutate(model = "전원율")
-) %>%
-  filter(term != "(Intercept)") %>%
-  mutate(term = dplyr::recode(term,
-                       infra_hospital_per_area = "병원(면적당)",
-                       infra_amb_per_area      = "구급차(면적당)",
-                       region_old              = "고령화율"),
-         유의 = ifelse(p.value < 0.05, "유의 (p<.05)", "비유의"))
-
-# 계수 플롯
-ggplot(coef_all, aes(x = estimate, y = term, color = 유의,
-                     xmin = conf.low, xmax = conf.high)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-  geom_errorbarh(height = .25, linewidth = .8) +
-  geom_point(size = 4) +
-  facet_wrap(~model, ncol = 3) +
-  scale_color_manual(values = c("유의 (p<.05)" = "#378ADD",
-                                "비유의"        = "#B4B2A9")) +
-  labs(title    = "Step 3 | 인프라 → 치료역량 회귀계수",
-       subtitle = "전체 모델 — 점: 계수 / 선: 95% CI / 점선: 0 기준",
-       x = "회귀계수 (Estimate)", y = NULL, color = NULL) +
+# 인프라 -> 치료역량 산점도 + 추세선
+data %>%
+  dplyr::select(infra_hospital_per_area, infra_amb_per_area,
+         ami_amb, ami_heal, ami_trans, metro) %>%
+  pivot_longer(cols = c(infra_hospital_per_area, infra_amb_per_area),
+               names_to = "인프라변수", values_to = "인프라값") %>%
+  pivot_longer(cols = c(ami_amb, ami_heal, ami_trans),
+               names_to = "치료역량변수", values_to = "치료역량값") %>%
+  mutate(
+    인프라변수   = case_when(
+      인프라변수 == "infra_hospital_per_area" ~ "병원(면적당)",
+      인프라변수 == "infra_amb_per_area"      ~ "구급차(면적당)"
+    ),
+    치료역량변수 = case_when(
+      치료역량변수 == "ami_amb"   ~ "구급차 이용률",
+      치료역량변수 == "ami_heal"  ~ "입원치료 제공률",
+      치료역량변수 == "ami_trans" ~ "전원율"
+    )
+  ) %>%
+  ggplot(aes(x = 인프라값, y = 치료역량값)) +
+  geom_point(alpha = .3, size = 1.5, color = "#378ADD") +
+  geom_smooth(method = "lm", se = TRUE, color = "#993C1D", linewidth = 1) +
+  facet_grid(치료역량변수 ~ 인프라변수, scales = "free") +
+  labs(title    = "Step 3 | 인프라 → 치료역량 관계",
+       subtitle = "면적당 인프라 — 산점도 + 선형 추세선",
+       x = "인프라 (면적당)", y = "치료역량") +
   theme_minimal(base_size = 12) +
-  theme(legend.position = "bottom",
-        plot.title      = element_text(face = "bold", size = 13),
+  theme(plot.title      = element_text(face = "bold", size = 13),
         plot.subtitle   = element_text(color = "grey50"),
         strip.text      = element_text(face = "bold"))
 
@@ -381,62 +378,109 @@ boxplot(ami_dead ~ metro, data = data,
 par(mfrow = c(1, 1))
 
 # 정규성 검정
-shapiro.test(data$ami_dead) # p-value = 2.949e-07 : 정규분포 아님
+shapiro.test(data$ami_dead) # p-value < 2.2e-16 : 정규분포 아님
 
-# 회귀 모델 수립
-m_dead <- lm(ami_dead ~ ami_amb + ami_heal + ami_trans + region_old, data = data)
+# 0값 개수 확인
+sum(data$ami_dead == 0)
+table(data$ami_dead == 0)
+# 응급실 내 사망자가 없는 지역이 실제로 존재
+
+# 로그 변환 (0값 처리를 위해 +1)
+data <- data %>%
+  mutate(log_ami_dead = log(ami_dead + 1))
+
+# 변환 후 분포 확인
+par(mfrow = c(1, 2))
+hist(data$log_ami_dead, main = "log(응급실 내 사망률 + 1)", col = "steelblue")
+boxplot(log_ami_dead ~ metro, data = data,
+        main = "log 사망률 (수도권 vs 비수도권)",
+        col = c("#1D9E75", "#378ADD"))
+par(mfrow = c(1, 1))
+
+# 정규성 재검정
+shapiro.test(data$log_ami_dead) # p-value = 1.628e-09 : 정규분포 아님
+
+# 회귀 모델 (log 변환 적용)
+m_dead <- lm(log_ami_dead ~ ami_amb + ami_heal + ami_trans + region_old,
+             data = data)
 summary(m_dead)
 
 #              Estimate Std. Error t value Pr(>|t|)
-# ami_amb      0.008279   0.023219   0.357 0.721724    
-# ami_heal    -0.343845   0.083084  -4.139 4.81e-05 ***
-# ami_trans   -0.368731   0.101706  -3.625 0.000351 ***
-# region_old  -0.005420   0.026545  -0.204 0.838378
+# ami_amb     -0.004709   0.002983  -1.578    0.116    
+# ami_heal    -0.102748   0.010676  -9.624  < 2e-16 ***
+# ami_trans   -0.102144   0.013068  -7.816 1.61e-13 ***
+# region_old  -0.005026   0.003411  -1.474    0.142
 
-# Multiple R-squared:  0.06022,	Adjusted R-squared:  0.03785
+# Multiple R-squared:  0.3016,	Adjusted R-squared:  0.2902
 
-# 전체 모델 계수 추출
-coef_dead <- tidy(m_dead, conf.int = TRUE) %>%
-  filter(term != "(Intercept)") %>%
-  mutate(term = case_when(
-    term == "ami_amb"    ~ "구급차 이용률",
-    term == "ami_heal"   ~ "입원치료 제공률",
-    term == "ami_trans"  ~ "전원율",
-    term == "region_old" ~ "고령화율"
-  ),
-  유의 = ifelse(p.value < 0.05, "유의 (p<.05)", "비유의"))
+# ami_amb   (구급차 이용률)   : p = 0.116  비유의 → 사망률과 관계 없음
+# ami_heal  (입원치료 제공률) : p < 0.001  유의   → 입원치료↑ log(사망률)↓ (Estimate = -0.103)
+# ami_trans (전원율)          : p < 0.001  유의   → 전원율↑  log(사망률)↓ (Estimate = -0.102)
+# region_old(고령화율)        : p = 0.142  비유의 → 사망률과 관계 없음
+# R² = 0.302 → 치료역량 변수들이 응급실 내 사망률의 30% 설명
 
-# 계수 플롯
-ggplot(coef_dead, aes(x = estimate, y = term, color = 유의,
-                      xmin = conf.low, xmax = conf.high)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-  geom_errorbarh(height = .25, linewidth = .8) +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("유의 (p<.05)" = "#378ADD",
-                                "비유의"        = "#B4B2A9")) +
-  labs(title    = "Step 4 | 치료역량 → 사망률 회귀계수",
-       subtitle = "전체 모델 — 점: 계수 / 선: 95% CI / 점선: 0 기준",
-       x = "회귀계수 (Estimate)", y = NULL, color = NULL) +
+# 층화 모델
+data_metro    <- data %>% filter(metro == "수도권")
+data_nonmetro <- data %>% filter(metro == "비수도권")
+
+m_dead_metro    <- lm(log_ami_dead ~ ami_amb + ami_heal + ami_trans + region_old,
+                      data = data_metro)
+m_dead_nonmetro <- lm(log_ami_dead ~ ami_amb + ami_heal + ami_trans + region_old,
+                      data = data_nonmetro)
+
+summary(m_dead_metro)
+summary(m_dead_nonmetro)
+
+# 수도권 (n=77)
+# ami_amb   (구급차 이용률)   : p = 0.348  비유의 → 사망률과 관계 없음
+# ami_heal  (입원치료 제공률) : p < 0.001  유의   → 입원치료↑ log(사망률)↓ (Estimate = -0.094)
+# ami_trans (전원율)          : p < 0.001  유의   → 전원율↑  log(사망률)↓ (Estimate = -0.103)
+# region_old(고령화율)        : p = 0.395  비유의 → 사망률과 관계 없음
+# R² = 0.252
+
+# 비수도권 (n=173)
+# ami_amb   (구급차 이용률)   : p = 0.254  비유의 → 사망률과 관계 없음
+# ami_heal  (입원치료 제공률) : p < 0.001  유의   → 입원치료↑ log(사망률)↓ (Estimate = -0.104)
+# ami_trans (전원율)          : p < 0.001  유의   → 전원율↑  log(사망률)↓ (Estimate = -0.103)
+# region_old(고령화율)        : p = 0.118  비유의 → 사망률과 관계 없음
+# R² = 0.318
+
+### 비수도권에서는 치료역량(입원치료, 전원율)이 응급실 내 사망률을 더 강하게 설명
+### 즉, 비수도권에서 치료역량 개선이 응급실 내 사망률 감소에 더 직접적인 영향을 미침
+
+# 각 치료역량 변수 → log 사망률 산점도
+data %>%
+  dplyr::select(log_ami_dead, ami_amb, ami_heal, ami_trans, metro) %>%
+  pivot_longer(cols = c(ami_amb, ami_heal, ami_trans),
+               names_to = "변수", values_to = "값") %>%
+  mutate(변수 = case_when(
+    변수 == "ami_amb"   ~ "구급차 이용률",
+    변수 == "ami_heal"  ~ "입원치료 제공률",
+    변수 == "ami_trans" ~ "전원율"
+  )) %>%
+  ggplot(aes(x = 값, y = log_ami_dead, color = metro)) +
+  geom_point(alpha = .4, size = 1.8) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 1) +
+  facet_wrap(~변수, scales = "free_x", ncol = 3) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "Step 4 | 치료역량 → 응급실 내 사망률",
+       subtitle = "수도권 vs 비수도권 — 선형 추세선 포함",
+       x = NULL, y = "log(응급실 내 사망률 + 1)", color = NULL) +
   theme_minimal(base_size = 12) +
   theme(legend.position = "bottom",
         plot.title      = element_text(face = "bold", size = 13),
-        plot.subtitle   = element_text(color = "grey50"))
-
-### 한계점
-# "본 연구의 데이터는 치료역량·인프라 변수만 포함하여 설명력에 한계가 있으나,
-# 입원치료 제공률과 전원율은 사망률에 유의한 영향을 미치는 것으로 확인됐다"
-
-### 결론
-# ami_amb   (구급차 이용률)   : p = 0.721724  비유의 → 사망률과 관계 없음
-# ami_heal  (입원치료 제공률) : p = 4.81e-05  유의   → 입원치료↑ 사망률↓ (Estimate = -0.344)
-# ami_trans (전원율)          : p = 0.000351  유의   → 전원율↑  사망률↓ (Estimate = -0.369)
-# region_old(고령화율)        : p = 0.838378  비유의 → 사망률과 관계 없음
-
-# R² = 0.066 → 설명력 낮음 (데이터 한계 — 중증도, 의료진 수 등 변수 부재)
+        plot.subtitle   = element_text(color = "grey50"),
+        strip.text      = element_text(face = "bold"))
 
 # 핵심 결론
-# 치료역량 중 입원치료 제공률, 전원율이 사망률에 유의한 영향을 미침
-# 단, R²가 낮아 모델 설명력에 한계가 있음을 명시 필요
+# 치료역량 중 입원치료 제공률, 전원율이 응급실 내 사망률에 유의한 영향을 미침
+# R² = 0.302로 치료역량 변수들이 응급실 내 사망률의 약 30% 설명 (양호한 수준)
+# 특히 비수도권(R²=0.318)에서 수도권(R²=0.252)보다 설명력이 높음
+# → 비수도권에서 치료역량 개선이 응급실 내 사망률 감소에 더 직접적인 영향
+
+# 한계점
+# 응급실 내 사망률 외 골든타임, 도착 전 사망 등 핵심 변수 부재
+# 나머지 70%는 본 연구에서 포함되지 않은 변수들로 설명될 가능성
 
 ################################################################################
 ################################################################################
@@ -450,7 +494,7 @@ med_model <- lm(ami_heal ~ infra_hospital_per_area + infra_amb_per_area + region
                 data = data)
 
 # 2단계: 인프라 + ami_heal → ami_dead (결과 모델)
-out_model <- lm(ami_dead ~ infra_hospital_per_area + infra_amb_per_area +
+out_model <- lm(log_ami_dead ~ infra_hospital_per_area + infra_amb_per_area +
                   ami_heal + region_old,
                 data = data)
 
@@ -463,13 +507,64 @@ med_result <- mediate(med_model, out_model,
                       sims     = 1000)
 summary(med_result)
 
-# ACME (간접효과)  : -0.951  p = 0.184  비유의 → 매개효과 없음
-# ADE  (직접효과)  : -0.951  p = 0.724  비유의 → 직접효과도 없음
-# Total Effect     : -1.902  p = 0.586  비유의 → 전체효과도 없음
-# Prop. Mediated   :  0.500  p = 0.686  비유의 → 매개 비율 의미 없음
+# ACME (간접효과) : -0.393  p = 0.016 * 유의
+#   인프라 → 입원치료 → 응급실 내 사망률 매개경로 존재
+#   인프라↑ → 입원치료↑ → log(응급실 내 사망률)↓
 
-# 95% CI가 모두 0을 포함 → 통계적으로 유의하지 않음
-# → 귀무가설 기각 실패 : 매개효과 확인되지 않음
+# ADE  (직접효과) : -0.305  p = 0.438  비유의
+#   인프라가 사망률에 미치는 직접 경로는 유의하지 않음
+
+# Total Effect   : -0.698  p = 0.194  비유의
+#   전체 효과는 유의하지 않음
+
+# Prop. Mediated :  0.563  p = 0.206  비유의
+#   간접효과 비율은 56.3%이나 통계적으로 유의하지 않음
+
+# 결론
+# ACME(간접효과)만 유의 → 매개경로 자체는 존재
+# 단, 전체효과와 매개비율은 비유의
+# → "인프라 → 입원치료 → 사망률" 간접 경로는 확인되나
+#    전체적인 인프라의 사망률 영향은 불확실
+# → 매개경로가 존재하지만 강도가 약하다는 보수적 해석이 적절
+
+# 수도권 매개효과
+med_model_metro <- lm(ami_heal ~ infra_hospital_per_area + infra_amb_per_area + region_old,
+                      data = data_metro)
+out_model_metro <- lm(log_ami_dead ~ infra_hospital_per_area + infra_amb_per_area +
+                        ami_heal + region_old,
+                      data = data_metro)
+
+set.seed(42)
+med_metro <- mediate(med_model_metro, out_model_metro,
+                     treat    = "infra_hospital_per_area",
+                     mediator = "ami_heal",
+                     boot     = TRUE, sims = 1000)
+summary(med_metro)
+
+# 비수도권 매개효과
+med_model_nonmetro <- lm(ami_heal ~ infra_hospital_per_area + infra_amb_per_area + region_old,
+                         data = data_nonmetro)
+out_model_nonmetro <- lm(log_ami_dead ~ infra_hospital_per_area + infra_amb_per_area +
+                           ami_heal + region_old,
+                         data = data_nonmetro)
+
+set.seed(42)
+med_nonmetro <- mediate(med_model_nonmetro, out_model_nonmetro,
+                        treat    = "infra_hospital_per_area",
+                        mediator = "ami_heal",
+                        boot     = TRUE, sims = 1000)
+summary(med_nonmetro)
+
+# 전체 데이터에서는 매개경로가 유의하게 확인됐지만
+# 층화 시 수도권/비수도권 각각에서는 유의하지 않음
+# → 표본이 작아지면서 검정력(statistical power)이 낮아진 영향
+# → 비수도권 p=0.094는 경계선으로 표본이 더 크다면 유의해질 가능성
+
+# 결론:
+# 매개 경로 자체는 전체 데이터에서 확인됨 (H0 기각)
+# 수도권/비수도권 간 강도 차이는 통계적으로 확인되지 않음
+# 단, 비수도권에서 매개 비율(49%)이 수도권(30%)보다 높아
+# 실질적 차이 가능성은 존재
 
 ################################################################################
 ################################################################################
@@ -516,9 +611,11 @@ sim_metro <- data.frame(
   region_old = mean(data_metro$region_old)
 )
 
-# 사망률 예측
-sim_nonmetro$예측사망률 <- round(predict(m_dead_nonmetro, newdata = sim_nonmetro), 4)
-sim_metro$예측사망률    <- round(predict(m_dead_metro,    newdata = sim_metro), 4)
+# 사망률 예측 후 역변환 (log → 원래 단위)
+sim_nonmetro$예측사망률 <- round(
+  exp(predict(m_dead_nonmetro, newdata = sim_nonmetro)) - 1, 4)
+sim_metro$예측사망률    <- round(
+  exp(predict(m_dead_metro,    newdata = sim_metro)) - 1, 4)
 
 # 두 그룹 합치기
 sim_nonmetro$그룹 <- "비수도권"
@@ -548,10 +645,19 @@ ggplot(sim_all, aes(x = 시나리오, y = 예측사망률,
         plot.subtitle   = element_text(color = "grey50"),
         axis.text.x     = element_text(size = 10))
 
-### 결론
-### 입원치료 제공률을 높일수록 사망률이 선형으로 크게 감소 : 가장 효과적
-### 전원율을 낮추면 오히려 사망률이 상승
-### 전원이 단순히 나쁜 게 아니라 중증 환자를 적절한 병원으로 보내는 필요한 과정
+# ami_heal 개선 시
+# +5%  → 비수도권 1.1165% → 0.2654% (약 76% 감소)
+# +10% → 거의 0에 수렴
+# → 입원치료 제공률 개선이 응급실 내 사망률에 매우 강력한 효과
+
+# ami_trans 개선 시 (전원율 감소)
+# -1% → 오히려 사망률 증가 (1.1165% → 1.3458%)
+# -2% → 더 증가 (1.60%)
+# → 전원율을 억지로 낮추면 역효과
+# → 전원은 필요한 과정 — 낮추는 게 목표가 아님
+
+# 수도권 vs 비수도권
+# 두 그룹 패턴 동일 → 치료역량 개선 효과는 지역 무관하게 일관됨
 
 ################################################################################
 ################################################################################
@@ -570,10 +676,10 @@ ggplot(sim_all, aes(x = 시나리오, y = 예측사망률,
 #    자료 접근의 한계 및 시도별 데이터로만 제공되어 표본이 적어 분석에 포함 불가
 #    → 사망률 설명력(R²)이 낮은 주요 원인
 
-# 2. 낮은 설명력 (R²)
-#    Step 3 R² = 0.037 ~ 0.049 / Step 4 R² = 0.060 ~ 0.152
-#    인프라·치료역량 변수만으로는 사망률 변동을 충분히 설명하지 못함
-#    → 의료진 수, 장비 수준, 환자 중증도 등 추가 변수 필요
+# 2. 설명력 한계
+#    Step 3 R² = 0.037 ~ 0.049 → 인프라 → 치료역량 설명력 낮음
+#    Step 4 R² = 0.252 ~ 0.318 → 치료역량 → 사망률 설명력 양호
+#    → 인프라 변수의 설명력 한계가 존재
 
 # 3. 횡단면 데이터의 한계
 #    1개 연도 데이터만 사용 → 인과관계 주장에 한계

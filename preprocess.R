@@ -87,7 +87,7 @@ str(ami_trans)
 head(ami_trans)
 colSums(is.na(ami_trans))
 
-ami_dead <- read.csv("병원 내 사망률.csv", fileEncoding = "UTF-8")
+ami_dead <- read.csv("응급실 내 사망률.csv", fileEncoding = "UTF-8")
 ami_dead <- ami_dead %>% rename(ami_dead="비율")
 str(ami_dead)
 head(ami_dead)
