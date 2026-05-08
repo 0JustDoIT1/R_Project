@@ -9,6 +9,7 @@ library(ggplot2)
 library(patchwork)
 library(car)
 library(mediation)
+library(broom)
 
 # 전처리된 데이터 불러오기
 data <- read.csv("final_data.csv", fileEncoding = "CP949")
@@ -326,6 +327,37 @@ summary(m_trans_nonmetro)
 # 수도권/비수도권 모두 비유의
 # 전원율도 인프라로 설명이 안 됨
 
+# 세 모델 계수 추출
+coef_all <- bind_rows(
+  tidy(m_amb,   conf.int = TRUE) %>% mutate(model = "구급차 이용률"),
+  tidy(m_heal,  conf.int = TRUE) %>% mutate(model = "입원치료 제공률"),
+  tidy(m_trans, conf.int = TRUE) %>% mutate(model = "전원율")
+) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = dplyr::recode(term,
+                       infra_hospital_per_area = "병원(면적당)",
+                       infra_amb_per_area      = "구급차(면적당)",
+                       region_old              = "고령화율"),
+         유의 = ifelse(p.value < 0.05, "유의 (p<.05)", "비유의"))
+
+# 계수 플롯
+ggplot(coef_all, aes(x = estimate, y = term, color = 유의,
+                     xmin = conf.low, xmax = conf.high)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_errorbarh(height = .25, linewidth = .8) +
+  geom_point(size = 4) +
+  facet_wrap(~model, ncol = 3) +
+  scale_color_manual(values = c("유의 (p<.05)" = "#378ADD",
+                                "비유의"        = "#B4B2A9")) +
+  labs(title    = "Step 3 | 인프라 → 치료역량 회귀계수",
+       subtitle = "전체 모델 — 점: 계수 / 선: 95% CI / 점선: 0 기준",
+       x = "회귀계수 (Estimate)", y = NULL, color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"),
+        strip.text      = element_text(face = "bold"))
+
 ### 결론
 ### 수도권에서만 구급차 이용률 모델이 유의했고, 나머지는 대부분 유의하지 않다
 ### 전체적으로 R²가 낮고 유의한 변수가 적어서 "인프라 → 치료역량" 경로가 약하다
@@ -362,6 +394,33 @@ summary(m_dead)
 # region_old  -0.005420   0.026545  -0.204 0.838378
 
 # Multiple R-squared:  0.06022,	Adjusted R-squared:  0.03785
+
+# 전체 모델 계수 추출
+coef_dead <- tidy(m_dead, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = case_when(
+    term == "ami_amb"    ~ "구급차 이용률",
+    term == "ami_heal"   ~ "입원치료 제공률",
+    term == "ami_trans"  ~ "전원율",
+    term == "region_old" ~ "고령화율"
+  ),
+  유의 = ifelse(p.value < 0.05, "유의 (p<.05)", "비유의"))
+
+# 계수 플롯
+ggplot(coef_dead, aes(x = estimate, y = term, color = 유의,
+                      xmin = conf.low, xmax = conf.high)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_errorbarh(height = .25, linewidth = .8) +
+  geom_point(size = 4) +
+  scale_color_manual(values = c("유의 (p<.05)" = "#378ADD",
+                                "비유의"        = "#B4B2A9")) +
+  labs(title    = "Step 4 | 치료역량 → 사망률 회귀계수",
+       subtitle = "전체 모델 — 점: 계수 / 선: 95% CI / 점선: 0 기준",
+       x = "회귀계수 (Estimate)", y = NULL, color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"))
 
 ### 한계점
 # "본 연구의 데이터는 치료역량·인프라 변수만 포함하여 설명력에 한계가 있으나,
