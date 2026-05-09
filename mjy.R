@@ -19,6 +19,8 @@ str(df) # 확인
 # install.packages("tidyr")
 # install.packages("corrplot")
 # install.packages("mediation")
+# install.packages("car")
+
 
 library(effsize)
 library(dplyr)
@@ -26,6 +28,7 @@ library(tidyr)
 library(ggplot2)
 library(corrplot)
 library(mediation)
+library(car)
 
 #############################################################################
 
@@ -377,10 +380,15 @@ ggplot(df, aes(x = ami_trans, y = ami_dead)) +
        y = "심근경색 사망률") +
   theme_minimal(base_size = 14)
 
-# 다중회귀 
-model_treat <- glm(ami_dead ~ ami_amb + ami_heal + ami_trans, family = "quasibinomial", data = df)
+# 다중회귀
+model_treat <- lm(ami_dead ~ ami_amb + ami_heal + ami_trans, data = df)
 summary(model_treat)
-
+# 다중공선성 확인
+vif(model_treat)
+# 결과 VIF -> ami_amb : 1.01, ami_heal : 5.45, ami_trans : 5.44
+# 치료제공률과 전원률 사이에 높은 상관이 있음 (의료체계 특성상 자연스러운 결과)
+# 치료 역량이 높은 지역일수록 자체 치료 비율이 높고 전원필요성이 감소
+# 치료 어려운 지역일수록 전원율이 높아질 수 밖에 없는 상황 
 ######################################################################
 
 ##### 4단계 : 매개효과- 인프라 + 치료역량 -> 사망률 #####
@@ -388,7 +396,7 @@ summary(model_treat)
 # 병원 수가 많을 수록 입원치료 제공률이 높아지는가
 med_model <- lm(ami_heal ~ infra_hospital_per100k, data = df)
 # 병원 수와 치료 제공률을 동시에 넣었을 때 사망률에 어떻게 영향을 주는가
-out_model <- glm(ami_dead ~ infra_hospital_per100k + ami_heal, family = "quasibinomial", data = df)
+out_model <- lm(ami_dead ~ infra_hospital_per100k + ami_heal, data = df)
 # 병원 수 증가 효과 중 얼마나 치료제공률을 통해 전달되는가
 med_result <- mediate(med_model, out_model, treat = "infra_hospital_per100k", mediator = "ami_heal", boot = TRUE, sims = 1000)
 summary(med_result)
@@ -412,7 +420,7 @@ plot(df$region_old, df$ami_dead, pch = 19)
 abline(lm(ami_dead ~ region_old, data = df), col = "skyblue", lwd = 2)
 
 # 통합모형
-model_final <- glm(ami_dead ~ ami_heal + ami_trans + ami_amb + region_old, family = quasibinomial, data = df)
+model_final <- lm(ami_dead ~ ami_heal + ami_trans + ami_amb + region_old, data = df)
 summary(model_final)
 
 ######################################################################
@@ -548,3 +556,6 @@ ggplot(scenario_result,
         plot.subtitle = element_text(size = 12),
         axis.text.x = element_text(size = 12, face = "bold"),
         axis.title.y = element_text(size = 14))
+
+
+
