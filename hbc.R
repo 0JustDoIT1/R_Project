@@ -1,27 +1,61 @@
-getwd()
-setwd("D:/Project/AI_class/R_Project_data")
+getwd() # 현재 작업 디렉토리 확인
+setwd("D:/Project/AI_class/R_Project_data") # 작업 디렉토리 지정
 
-# 사용라이브러리 모음
-library(tidyverse)
-library(coin)     # wilcox_test()
-library(effsize)  # cohen.d()
-library(ggplot2)
-library(patchwork)
-library(car)
-library(mediation)
-library(broom)
-library(lmtest)
-library(sf)
-library(ggcorrplot)
+# =========================
+# 사용 라이브러리 모음
+# =========================
+library(tidyverse) # 데이터 분석 기본 패키지 묶음
+library(coin)     # 비모수 통계 분석 패키지 : wilcox_test()
+library(effsize)  # 효과크기 계산 패키지 : cohen.d()
+library(ggplot2) # 대표적인 데이터 시각화 패키지
+library(patchwork) # 여러 ggplot 그래프를 한 화면에 배치
+library(car) # 회귀분석 진단 패키지 : vif()
+library(mediation) # 매개효과 분석 패키지(간접효과 분석)
+library(broom) # 회귀분석 결과를 데이터프레임 형태로 정리
+library(lmtest) # 선형회귀 추가 검정 패키지 : bptest()
+library(sf) # 공간데이터(지도/shp) 처리 패키지
+library(ggcorrplot) # 상관관계 행렬 시각화
 
 # 전처리된 데이터 불러오기
-data <- read.csv("final_data.csv", fileEncoding = "CP949")
-str(data)
-head(data)
+data <- read.csv("final_data.csv", fileEncoding = "CP949") # 데이터 불러오기 + 인코딩 타입 지정
+str(data) # 데이터 구조 파악
+head(data) # 데이터 상위 6개 행 확인
 
 # metro 변수 범주형 데이터로 변환
 data$metro <- as.factor(data$metro)
 str(data)
+
+# 상관행렬 시각화 - 모든 변수 간 관계 한눈에
+data %>%
+  # 컬럼 선택
+  dplyr::select(infra_hospital_per_area, infra_amb_per_area,
+                ami_amb, ami_heal, ami_trans, ami_dead, region_old) %>%
+  # 상관계수 계산 함수: cor()
+  # 결측치(NA) 제외 후 계산, spaearman(순위 기반, 표본 수 적은 경우, 정규성 어려운 경우)
+  cor(use = "complete.obs", method = "spearman") %>% 
+  # 상관행렬 시각화
+  # 정사각형 형태 hitmap, 하단 삼각형만 표시, 상관관계 숫자 표시, 숫자 크기
+  ggcorrplot(method = "square", type = "lower", 
+             lab = TRUE, lab_size = 3)
+
+# 강한 관계
+# ami_heal ↔ ami_trans : -0.73  강한 음의 상관
+#   → 입원치료 제공률이 높을수록 전원율이 낮음
+#   → 자체 처리 역량이 높으면 전원할 필요가 없다는 해석
+
+# 중간 관계
+# infra_hospital_per_area ↔ infra_amb_per_area : +0.53
+#   → 병원과 구급차 인프라는 함께 몰려 있음 (수도권)
+# infra_amb_per_area ↔ region_old : -0.53
+#   → 고령화율 높을수록 구급차 접근성 낮음 (Step 2 결과와 일치)
+# infra_hospital_per_area ↔ region_old : -0.47
+#   → 고령화율 높을수록 병원 접근성 낮음 (Step 2 결과와 일치)
+
+# 약한 관계 (주목)
+# 인프라 ↔ ami_dead : -0.17, 0.01
+#   → 인프라와 사망률 관계 매우 약함 → Step 3 결과와 일치
+# ami_heal ↔ ami_dead : -0.34
+#   → 입원치료↑ 사망률↓ → Step 4 결과와 일치
 
 ################################################################################
 ################################################################################
@@ -34,14 +68,17 @@ str(data)
 # 1-1. 인구 기준
 
 # EDA (탐색적 분석)
+# 기초 통계 요약 정보 : summary()
 summary(data[, c("infra_hospital_per100k", "infra_amb_per100k")])
 
-par(mfrow = c(2,2))
+par(mfrow = c(2,2)) # 그래프 출력 영역 분할 (2x2)
+# 히스토그램(분포와 치우침 확인)
 hist(data$infra_hospital_per100k, main="병원 수 (per100k)", col = "steelblue")
 hist(data$infra_amb_per100k, main="구급차 수 (per100k)", col = "steelblue")
+# 박스플롯(중앙값, 사분위수, 이상치 확인)
 boxplot(data$infra_hospital_per100k, main="병원 수 (per100k)")
 boxplot(data$infra_amb_per100k, main="구급차 수 (per100k)")
-par(mfrow = c(1,1))
+par(mfrow = c(1,1)) # 그래프 화면 분할 설정 초기화
 
 # 정규성 검정
 shapiro.test(data$infra_hospital_per100k) # p-value < 2.2e-16 : 정규분포 아님
@@ -49,13 +86,15 @@ shapiro.test(data$infra_amb_per100k) # p-value = 9.019e-15 : 정규분포 아님
 
 # 수도권/비수도권 분포 확인
 par(mfrow = c(1, 2))
+# 박스플롯 포뮬라 y ~ x : x 그룹 별로 나눠서 그려라, main : 타이틀 , col : 색상(그룹 색상)
 boxplot(infra_hospital_per100k ~ metro, data = data,
         main = "병원 수 (per100k)", col = c("#1D9E75", "#378ADD"))
 boxplot(infra_amb_per100k ~ metro, data = data,
         main = "구급차 수 (per100k)", col = c("#1D9E75", "#378ADD"))
 par(mfrow = c(1, 1))
 
-# Wilcoxon test (정규분포 아니므로 t-test 대신 wilcoxon test)
+# Wilcoxon test (정규분포 아니므로 t-test 대신 wilcoxon test, 비모수검정, 순위 검증)
+# wilcox 에서 포뮬라 y ~ x : x 그룹 별로 y 비교
 wilcox.test(infra_hospital_per100k ~ metro, data = data)
   # p-value = 2.375e-09
   # 귀무가설 기각 : 수도권과 비수도권의 병원 수(인구당) 차이가 유의함
@@ -63,7 +102,8 @@ wilcox.test(infra_amb_per100k ~ metro, data = data)
   # p-value = 1.252e-15
   # 귀무가설 기각 : 수도권과 비수도권의 구급차 수(인구당) 차이가 유의함
 
-# Cohen's d — 효과크기
+# Cohen's d — 효과크기 검증
+# 0.2 : 작은 차이 / 0.5 : 중간 차이 / 0.8이상 : 큰 차이
 # 그룹 순서 확인
 levels(data$metro) # [1] "비수도권" "수도권"
 cohen.d(infra_hospital_per100k ~ metro, data = data)
@@ -76,9 +116,9 @@ cohen.d(infra_amb_per100k ~ metro, data = data)
 # 그룹별 중앙값 확인 (Wilcoxon은 중앙값 기준)
 # 실제 차이 값 비교를 위해서 진행
 data %>%
-  group_by(metro) %>%
-  summarise(
-    hospital_median = round(median(infra_hospital_per100k), 4),
+  group_by(metro) %>% # metro로 그룹핑
+  summarise( # 그룹별 요약 통계 : 안에 함수에 대한 결과를 요약해서 표로 생성
+    hospital_median = round(median(infra_hospital_per100k), 4), # 반올림 처리
     hospital_mean   = round(mean(infra_hospital_per100k), 4),
     amb_median      = round(median(infra_amb_per100k), 4),
     amb_mean        = round(mean(infra_amb_per100k), 4)
@@ -172,16 +212,25 @@ data %>%
     병원  = median(infra_hospital_per100k),
     구급차 = median(infra_amb_per100k)
   ) %>%
+  # 세로형으로 변환
+  # metro 제외한 나머지 컬럼 세로로 변환
+  # names_to : 기존 컬럼명을 "변수" 컬럼에 저장
+  # values_to : 실제 숫자값을 "중앙값" 컬럼에 저장
   pivot_longer(-metro, names_to = "변수", values_to = "중앙값") %>%
-  ggplot(aes(x = 변수, y = 중앙값, fill = metro)) +
+  ggplot(aes(x = 변수, y = 중앙값, fill = metro)) + # 그래프 기본
+  # 막대그래프 생성 (dodge : 옆으로 나란히 배치, width: 넓이, alpha : 투명도)
   geom_col(position = "dodge", width = .5, alpha = .85) +
+  # 막대 위 숫자 표시 (위치, 크기)
   geom_text(aes(label = round(중앙값, 4)),
             position = position_dodge(.5), vjust = -.5, size = 4) +
+  # 그룹별 색상 직접 지정
   scale_fill_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  # 그래프 제목/축 이름 설정
   labs(title    = "인구당 응급 인프라 — 수도권 vs 비수도권",
        subtitle = "비수도권이 병원 2.5배 / 구급차 3.6배 높음",
        x = NULL, y = "중앙값", fill = NULL) +
   theme_minimal(base_size = 12) +
+  # 범례 아래쪽 배치, 굵기 색상
   theme(legend.position = "bottom",
         plot.title      = element_text(face = "bold"),
         plot.subtitle   = element_text(color = "grey50"))
@@ -230,13 +279,16 @@ par(mfrow = c(1, 1))
 # 정규성 검정
 shapiro.test(data$region_old)
 # p-value = 5.535e-09 : 정규분포 아님
-# 상관분석에서 Pearson 대신 Spearman 사용
-# Pearson : 두 변수가 선형 관계로 가정 (정규분포에 사용), 이상치에 민감
-# Spearman : 순위 기반, 선형 관계 아니어도 가능 (정규분포 아니어도 됨), 이상치에 강건
 
 # cor.test.default(data$region_old, data$infra_hospital_per_area, 에서:
 # tie때문에 정확한 p값을 계산할 수 없습니다
 # 표본이 250개로 충분히 크기 때문에 exat=FALSE로 근사 p값을 사용해도 신뢰 가능
+
+# cor.test() : 상관계수 + 유의성 검정(p-value)
+# 상관분석에서 Pearson 대신 Spearman 사용
+# Pearson : 두 변수가 선형 관계로 가정 (정규분포에 사용), 이상치에 민감
+# Spearman : 순위 기반, 선형 관계 아니어도 가능 (정규분포 아니어도 됨), 이상치에 강건
+# rho : 상관계수 값, p-value : 유의성
 
 # 고령화율 ↔ 인프라 (면적당 기준)
 cor.test(data$region_old, data$infra_hospital_per_area, method = "spearman", exact = FALSE)
@@ -287,6 +339,9 @@ shapiro.test(data$ami_trans) # p-value < 2.2e-16 : 정규분포 아님
 # 다중공선성 확인 (VIF)
 # 회귀모델 적용 전에 독립변수들 간 상관성이 높은지 확인
 # 기본 회귀모델로 VIF 확인
+# 1 : 전혀 문제 없음 , 1~5 : 보통 괜찮음 , 5 이상 : 주의 , 10 이상 : 심각한 다중공산성
+
+# lm : 선형회귀 = 독립변수들이 종속변수에 어떤 영향을 주는지 분석
 vif_model <- lm(ami_amb ~ infra_hospital_per_area + infra_amb_per_area + region_old,
                 data = data)
 vif(vif_model)
@@ -328,11 +383,14 @@ summary(m_trans)
 # 수도권/비수도권 모두 비유의
 # 전원율도 인프라로 설명이 안 됨
 
+# 회귀 모델을 박스플롯에 넣으면 자동으로 회귀 진단용 그래프 4개 나옴
+
 # 구급차 이용률
 par(mfrow = c(2, 2))
 plot(m_amb, main = "잔차 진단 — 구급차 이용률")
 par(mfrow = c(1, 1))
 shapiro.test(residuals(m_amb))
+# 잔차 검증 : 등분산성 체크 => 이분산성이 높으면 결과 신뢰도가 떨어질 가능성 있음
 bptest(m_amb)
 
 # 입원치료 제공률
@@ -353,20 +411,33 @@ bptest(m_trans)
 # 극단값 제거 + 수도권/비수도권 색상 구분
 # 구급차 이용률
 data %>%
+  # filter() : 조건에 맞는 행만 추출
+  # quantile() : 데이터를 크기 순으로 정렬했을 때 상위 5% 직전 값
   filter(infra_hospital_per_area < quantile(infra_hospital_per_area, 0.95),
          infra_amb_per_area < quantile(infra_amb_per_area, 0.95)) %>%
   dplyr::select(infra_hospital_per_area, infra_amb_per_area, ami_amb, metro) %>%
+  # cols = : 세로형 변환할 컬럼 지정
   pivot_longer(cols = c(infra_hospital_per_area, infra_amb_per_area),
                names_to = "인프라변수", values_to = "인프라값") %>%
+  # mutate() : 새로운 컬럼 추가 혹은 기존 컬럼 수정
+  # case_when() : 조건문 => 조건 ~ 결과
   mutate(인프라변수 = case_when(
     인프라변수 == "infra_hospital_per_area" ~ "병원(면적당)",
     인프라변수 == "infra_amb_per_area"      ~ "구급차(면적당)"
   )) %>%
   ggplot(aes(x = 인프라값, y = ami_amb, color = metro)) +
+  # 산점도(scatter plot) 생성 함수
   geom_point(alpha = .4, size = 2) +
+  # 추세선(trend line) 추가 함수
+  # method = "lm" : 선형회귀선 사용(직선 추세선)
+  # se = FALSE : 신뢰구간 음영 제거
+  # aes(group = ) : 그룹별로 따로 회귀선 생성
   geom_smooth(method = "lm", se = FALSE, linewidth = 1,
               aes(group = metro)) +
+  # 그래프를 변수별로 나눠서 출력
+  # scales = "free_x" : 각 그래프 x축 범위를 독립적으로 설정
   facet_wrap(~인프라변수, scales = "free_x", ncol = 2) +
+  # 색상 직접 설정
   scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
   labs(title    = "Step 3-1 | 인프라 → 구급차 이용률",
        subtitle = "수도권 vs 비수도권 / 상위 5% 극단값 제거",
@@ -470,9 +541,9 @@ sido_map <- c(
 # map 조인 키 생성
 map <- map %>%
   mutate(
-    sido_cd    = substr(SIG_CD, 1, 2),
+    sido_cd    = substr(SIG_CD, 1, 2), # substr : 문자열 잘라내기
     sido_nm    = sido_map[sido_cd],
-    sig_kor_nm = paste0(sido_nm, " ", SIG_KOR_NM)
+    sig_kor_nm = paste0(sido_nm, " ", SIG_KOR_NM) # paste0 : 문자열 이어붙이기
   )
 
 # data 조인 키 생성
@@ -486,15 +557,20 @@ map_joined <- map %>%
 # 수도권 경계 추출
 map_metro <- map_joined %>%
   filter(metro == "수도권") %>%
+  # 공간 데이터 함수 : 여러 지도 경계를 하나로 합치기 위해서
   st_union()
 
 # 지도 1-1 — 면적당 병원 수 + 수도권 경계
 # 로그 스케일 적용
 ggplot(map_joined) +
+  # 공간 데이터(지도 데이터)를 그리는 함수
   geom_sf(aes(fill = infra_hospital_per_area),
           color = "white", linewidth = 0.05) +
   geom_sf(data = map_metro,
           fill = NA, color = "#FF4444", linewidth = 0.05) +
+  # 연속형 숫자 데이터를 색상 그라데이션으로 표현
+  # scales::rescale() => 0 ~ 1 사이로 정규화
+  # na.value : 결측치 색상 지정
   scale_fill_gradientn(
     colors   = c("#F8FAFC", "#BAE6FD", "#0284C7", "#0C4A6E"),
     values   = scales::rescale(c(0, 0.002, 0.02, 0.4)),
@@ -503,6 +579,7 @@ ggplot(map_joined) +
   ) +
   labs(title    = "EDA | 면적당 응급기관 수 분포",
        subtitle = "빨간선: 수도권") +
+  # 지도 시각화에 많이 사용 : 축, 배경, 눈금 제거
   theme_void() +
   theme(plot.title      = element_text(face = "bold", size = 13, hjust = 0.5),
         plot.subtitle   = element_text(color = "grey50", size = 10, hjust = 0.5),
@@ -552,11 +629,14 @@ ggplot(map_joined) +
 shapiro.test(data$ami_dead) # p-value < 2.2e-16 : 정규분포 아님
 
 # 0값 개수 확인
-sum(data$ami_dead == 0)
-table(data$ami_dead == 0)
+sum(data$ami_dead == 0) # 비교연산 통해서 숫자 더하기(TRUE : 1, FALSE : 0)
+table(data$ami_dead == 0) # 빈도표 생성
 # 응급실 내 사망자가 없는 지역이 실제로 존재
 
 # 로그 변환 (0값 처리를 위해 +1)
+# 자연로그 : 값을 로그 스케일로 변환
+# 로그 변환 이유 : 한쪽으로 심하게 치우쳤거나, 극단값이 크거나, 분산 차이가 심할 때
+# +1 하는 이유 : 0이 존재해서 계산이 안되기 때문에
 data <- data %>%
   mutate(log_ami_dead = log(ami_dead + 1))
 
@@ -694,7 +774,12 @@ out_model <- lm(log_ami_dead ~ infra_hospital_per_area + infra_amb_per_area +
                 data = data)
 
 # Bootstrap 매개효과 검정
-set.seed(42)
+set.seed(42) # 난수 고정 코드 => 랜덤 샘플링 결과 통일
+# mediate : 매개효과 분석 함수
+# treate = : 독립변수 지정
+# mediator = : 매개변수 지정
+# boot = TRUE : 부트스트래핑 사용 (데이터를 반복 재표본 추출)
+# sims = 1000 : 반복 횟수
 med_result <- mediate(med_model, out_model,
                       treat    = "infra_hospital_per_area",
                       mediator = "ami_heal",
@@ -703,6 +788,9 @@ med_result <- mediate(med_model, out_model,
 summary(med_result)
 
 ggplot() +
+  # annotate : 그래프 위에 도형, 선, 텍스트 등을 직접 추가 (rect, segment, text 등)
+  # 보통 diagram을 그리는 방식
+  
   # 노드
   annotate("rect", xmin=0, xmax=2, ymin=1.7, ymax=2.3, fill="#DBEAFE", color="#2563EB") +
   annotate("rect", xmin=4, xmax=6, ymin=2.7, ymax=3.3, fill="#DCFCE7", color="#0F6E56") +
@@ -735,6 +823,7 @@ ggplot() +
         plot.subtitle = element_text(color="grey50", size=10, hjust=0.5))
 
 # ACME 비교 플롯 — 전체 / 수도권 / 비수도권
+# 표 생성
 med_plot_df <- data.frame(
   그룹     = c("전체", "수도권", "비수도권"),
   ACME     = c(-0.393, -0.224, -0.363),
@@ -745,17 +834,24 @@ med_plot_df <- data.frame(
 ) %>%
   mutate(그룹 = factor(그룹, levels = c("전체", "수도권", "비수도권")))
 
+# 매개효과 결과 데이터를 사용
+# ymin, ymax 활용해서 신뢰구간 범위 지정
 ggplot(med_plot_df, aes(x = 그룹, y = ACME,
                         ymin = CI_lower, ymax = CI_upper,
                         color = 유의)) +
+  # 가로 기준선 추가
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  # 신뢰구간 막대 생성
   geom_errorbar(width = .15, linewidth = 1) +
+  # 점 표시
   geom_point(size = 5) +
+  # 텍스트 추가
   geom_text(aes(label = paste0("ACME = ", ACME, "\n", p값)),
             vjust = -1.2, size = 3.5, color = "grey30") +
   scale_color_manual(values = c("유의"   = "#378ADD",
                                 "경계선" = "#EF9F27",
                                 "비유의" = "#B4B2A9")) +
+  # y축 범위 고정
   ylim(-1.2, 0.5) +
   labs(title    = "Step 5 | 매개효과(ACME) 비교",
        subtitle = "인프라 → 입원치료 → 응급실 내 사망률 간접효과 (Bootstrap 95% CI)",
@@ -834,6 +930,7 @@ summary(med_nonmetro)
 # ami_heal, ami_trans를 개선했을 때 사망률이 얼마나 감소하는지 예측
 
 # 비수도권 시나리오 수정
+# 원하는 시나리오 값으로 데이터 프레임 생성
 sim_nonmetro <- data.frame(
   시나리오   = c("현재", "ami_heal +1%", "ami_heal +2%",
              "ami_trans -1%", "ami_trans -2%"),
@@ -870,6 +967,8 @@ sim_metro <- data.frame(
 )
 
 # 사망률 예측 후 역변환
+# predict : 예측값 계산
+# exp : 로그를 되돌리는 함수
 sim_nonmetro$예측사망률 <- round(
   exp(predict(m_dead_nonmetro, newdata = sim_nonmetro)) - 1, 4)
 sim_metro$예측사망률    <- round(
@@ -878,6 +977,7 @@ sim_metro$예측사망률    <- round(
 # 두 그룹 합치기
 sim_nonmetro$그룹 <- "비수도권"
 sim_metro$그룹    <- "수도권"
+# rbind : 행 기준으로 합치기
 sim_all <- rbind(sim_nonmetro, sim_metro)
 
 # 선그래프
@@ -1051,39 +1151,15 @@ ggplot(map_joined) +
 
 # 목록 확인
 map_joined %>%
+  # sf 객체에서 지도 정보 제거 => 일반 데이터프레임으로 변환
   st_drop_geometry() %>%
   filter(이중취약 == "이중 취약 지역") %>%
   dplyr::select(sido_nm, SIG_KOR_NM, region_old,
                 infra_hospital_per_area, ami_dead) %>%
+  # 정렬 함수
   arrange(desc(ami_dead)) %>%
+  # 컬럼 이름 변경
   rename(시도 = sido_nm, 시군구 = SIG_KOR_NM,
          고령화율 = region_old,
          병원접근성 = infra_hospital_per_area,
          사망률 = ami_dead)
-
-# 상관행렬 시각화 - 모든 변수 간 관계 한눈에
-data %>%
-  dplyr::select(infra_hospital_per_area, infra_amb_per_area,
-         ami_amb, ami_heal, ami_trans, ami_dead, region_old) %>%
-  cor(use = "complete.obs", method = "spearman") %>%
-  ggcorrplot(method = "square", type = "lower",
-             lab = TRUE, lab_size = 3)
-
-# 강한 관계
-# ami_heal ↔ ami_trans : -0.73  강한 음의 상관
-#   → 입원치료 제공률이 높을수록 전원율이 낮음
-#   → 자체 처리 역량이 높으면 전원할 필요가 없다는 해석
-
-# 중간 관계
-# infra_hospital_per_area ↔ infra_amb_per_area : +0.53
-#   → 병원과 구급차 인프라는 함께 몰려 있음 (수도권)
-# infra_amb_per_area ↔ region_old : -0.53
-#   → 고령화율 높을수록 구급차 접근성 낮음 (Step 2 결과와 일치)
-# infra_hospital_per_area ↔ region_old : -0.47
-#   → 고령화율 높을수록 병원 접근성 낮음 (Step 2 결과와 일치)
-
-# 약한 관계 (주목)
-# 인프라 ↔ ami_dead : -0.17, 0.01
-#   → 인프라와 사망률 관계 매우 약함 → Step 3 결과와 일치
-# ami_heal ↔ ami_dead : -0.34
-#   → 입원치료↑ 사망률↓ → Step 4 결과와 일치
