@@ -10,6 +10,9 @@ library(patchwork)
 library(car)
 library(mediation)
 library(broom)
+library(lmtest)
+library(sf)
+library(ggcorrplot)
 
 # 전처리된 데이터 불러오기
 data <- read.csv("final_data.csv", fileEncoding = "CP949")
@@ -270,6 +273,7 @@ par(mfrow = c(2, 3))
 hist(data$ami_amb,   main = "구급차 이용률",   col = "steelblue")
 hist(data$ami_heal,  main = "입원치료 제공률", col = "steelblue")
 hist(data$ami_trans, main = "전원율",          col = "steelblue")
+par(mfrow = c(1, 3))
 boxplot(ami_amb   ~ metro, data = data, main = "구급차 이용률",   col = c("#1D9E75", "#378ADD"))
 boxplot(ami_heal  ~ metro, data = data, main = "입원치료 제공률", col = c("#1D9E75", "#378ADD"))
 boxplot(ami_trans ~ metro, data = data, main = "전원율",          col = c("#1D9E75", "#378ADD"))
@@ -324,34 +328,107 @@ summary(m_trans)
 # 수도권/비수도권 모두 비유의
 # 전원율도 인프라로 설명이 안 됨
 
+# 구급차 이용률
+par(mfrow = c(2, 2))
+plot(m_amb, main = "잔차 진단 — 구급차 이용률")
+par(mfrow = c(1, 1))
+shapiro.test(residuals(m_amb))
+bptest(m_amb)
+
+# 입원치료 제공률
+par(mfrow = c(2, 2))
+plot(m_heal, main = "잔차 진단 — 입원치료 제공률")
+par(mfrow = c(1, 1))
+shapiro.test(residuals(m_heal))
+bptest(m_heal)
+
+# 전원율
+par(mfrow = c(2, 2))
+plot(m_trans, main = "잔차 진단 — 전원율")
+par(mfrow = c(1, 1))
+shapiro.test(residuals(m_trans))
+bptest(m_trans)
+
 # 인프라 -> 치료역량 산점도 + 추세선
+# 극단값 제거 + 수도권/비수도권 색상 구분
+# 구급차 이용률
 data %>%
-  dplyr::select(infra_hospital_per_area, infra_amb_per_area,
-         ami_amb, ami_heal, ami_trans, metro) %>%
+  filter(infra_hospital_per_area < quantile(infra_hospital_per_area, 0.95),
+         infra_amb_per_area < quantile(infra_amb_per_area, 0.95)) %>%
+  dplyr::select(infra_hospital_per_area, infra_amb_per_area, ami_amb, metro) %>%
   pivot_longer(cols = c(infra_hospital_per_area, infra_amb_per_area),
                names_to = "인프라변수", values_to = "인프라값") %>%
-  pivot_longer(cols = c(ami_amb, ami_heal, ami_trans),
-               names_to = "치료역량변수", values_to = "치료역량값") %>%
-  mutate(
-    인프라변수   = case_when(
-      인프라변수 == "infra_hospital_per_area" ~ "병원(면적당)",
-      인프라변수 == "infra_amb_per_area"      ~ "구급차(면적당)"
-    ),
-    치료역량변수 = case_when(
-      치료역량변수 == "ami_amb"   ~ "구급차 이용률",
-      치료역량변수 == "ami_heal"  ~ "입원치료 제공률",
-      치료역량변수 == "ami_trans" ~ "전원율"
-    )
-  ) %>%
-  ggplot(aes(x = 인프라값, y = 치료역량값)) +
-  geom_point(alpha = .3, size = 1.5, color = "#378ADD") +
-  geom_smooth(method = "lm", se = TRUE, color = "#993C1D", linewidth = 1) +
-  facet_grid(치료역량변수 ~ 인프라변수, scales = "free") +
-  labs(title    = "Step 3 | 인프라 → 치료역량 관계",
-       subtitle = "면적당 인프라 — 산점도 + 선형 추세선",
-       x = "인프라 (면적당)", y = "치료역량") +
+  mutate(인프라변수 = case_when(
+    인프라변수 == "infra_hospital_per_area" ~ "병원(면적당)",
+    인프라변수 == "infra_amb_per_area"      ~ "구급차(면적당)"
+  )) %>%
+  ggplot(aes(x = 인프라값, y = ami_amb, color = metro)) +
+  geom_point(alpha = .4, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1,
+              aes(group = metro)) +
+  facet_wrap(~인프라변수, scales = "free_x", ncol = 2) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "Step 3-1 | 인프라 → 구급차 이용률",
+       subtitle = "수도권 vs 비수도권 / 상위 5% 극단값 제거",
+       x = "인프라 (면적당)", y = "구급차 이용률 (%)",
+       color = NULL) +
   theme_minimal(base_size = 12) +
-  theme(plot.title      = element_text(face = "bold", size = 13),
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"),
+        strip.text      = element_text(face = "bold"))
+
+# 입원치료 제공률
+data %>%
+  filter(infra_hospital_per_area < quantile(infra_hospital_per_area, 0.95),
+         infra_amb_per_area < quantile(infra_amb_per_area, 0.95)) %>%
+  dplyr::select(infra_hospital_per_area, infra_amb_per_area, ami_heal, metro) %>%
+  pivot_longer(cols = c(infra_hospital_per_area, infra_amb_per_area),
+               names_to = "인프라변수", values_to = "인프라값") %>%
+  mutate(인프라변수 = case_when(
+    인프라변수 == "infra_hospital_per_area" ~ "병원(면적당)",
+    인프라변수 == "infra_amb_per_area"      ~ "구급차(면적당)"
+  )) %>%
+  ggplot(aes(x = 인프라값, y = ami_heal, color = metro)) +
+  geom_point(alpha = .4, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1,
+              aes(group = metro)) +
+  facet_wrap(~인프라변수, scales = "free_x", ncol = 2) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "Step 3-2 | 인프라 → 입원치료 제공률",
+       subtitle = "수도권 vs 비수도권 / 상위 5% 극단값 제거",
+       x = "인프라 (면적당)", y = "입원치료 제공률 (%)",
+       color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"),
+        strip.text      = element_text(face = "bold"))
+
+# 전원율
+data %>%
+  filter(infra_hospital_per_area < quantile(infra_hospital_per_area, 0.95),
+         infra_amb_per_area < quantile(infra_amb_per_area, 0.95)) %>%
+  dplyr::select(infra_hospital_per_area, infra_amb_per_area, ami_trans, metro) %>%
+  pivot_longer(cols = c(infra_hospital_per_area, infra_amb_per_area),
+               names_to = "인프라변수", values_to = "인프라값") %>%
+  mutate(인프라변수 = case_when(
+    인프라변수 == "infra_hospital_per_area" ~ "병원(면적당)",
+    인프라변수 == "infra_amb_per_area"      ~ "구급차(면적당)"
+  )) %>%
+  ggplot(aes(x = 인프라값, y = ami_trans, color = metro)) +
+  geom_point(alpha = .4, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1,
+              aes(group = metro)) +
+  facet_wrap(~인프라변수, scales = "free_x", ncol = 2) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "Step 3-3 | 인프라 → 전원율",
+       subtitle = "수도권 vs 비수도권 / 상위 5% 극단값 제거",
+       x = "인프라 (면적당)", y = "전원율 (%)",
+       color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
         plot.subtitle   = element_text(color = "grey50"),
         strip.text      = element_text(face = "bold"))
 
@@ -377,6 +454,100 @@ boxplot(ami_dead ~ metro, data = data,
         col = c("#1D9E75", "#378ADD"))
 par(mfrow = c(1, 1))
 
+# shp 파일 로드
+map <- st_read("sig.shp", options = "ENCODING=CP949") %>%
+  st_set_crs(5179)
+
+# 시도 코드 → 시도명 매핑
+sido_map <- c(
+  "11" = "서울", "26" = "부산", "27" = "대구", "28" = "인천",
+  "29" = "광주", "30" = "대전", "31" = "울산", "36" = "세종",
+  "41" = "경기", "43" = "충북", "44" = "충남", "45" = "전북",
+  "46" = "전남", "47" = "경북", "48" = "경남", "50" = "제주",
+  "51" = "강원"
+)
+
+# map 조인 키 생성
+map <- map %>%
+  mutate(
+    sido_cd    = substr(SIG_CD, 1, 2),
+    sido_nm    = sido_map[sido_cd],
+    sig_kor_nm = paste0(sido_nm, " ", SIG_KOR_NM)
+  )
+
+# data 조인 키 생성
+data <- data %>%
+  mutate(sig_kor_nm = paste0(region, " ", district))
+
+# 조인
+map_joined <- map %>%
+  left_join(data, by = "sig_kor_nm")
+
+# 수도권 경계 추출
+map_metro <- map_joined %>%
+  filter(metro == "수도권") %>%
+  st_union()
+
+# 지도 1-1 — 면적당 병원 수 + 수도권 경계
+# 로그 스케일 적용
+ggplot(map_joined) +
+  geom_sf(aes(fill = infra_hospital_per_area),
+          color = "white", linewidth = 0.05) +
+  geom_sf(data = map_metro,
+          fill = NA, color = "#FF4444", linewidth = 0.05) +
+  scale_fill_gradientn(
+    colors   = c("#F8FAFC", "#BAE6FD", "#0284C7", "#0C4A6E"),
+    values   = scales::rescale(c(0, 0.002, 0.02, 0.4)),
+    name     = "병원 수\n(km² 당)",
+    na.value = "grey90"
+  ) +
+  labs(title    = "EDA | 면적당 응급기관 수 분포",
+       subtitle = "빨간선: 수도권") +
+  theme_void() +
+  theme(plot.title      = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle   = element_text(color = "grey50", size = 10, hjust = 0.5),
+        legend.position = "right")
+
+# 지도 1-2 — 면적당 구급차 수 + 수도권 경계
+ggplot(map_joined) +
+  geom_sf(aes(fill = infra_amb_per_area),
+          color = "white", linewidth = 0.05) +
+  geom_sf(data = map_metro,
+          fill = NA, color = "#FF4444", linewidth = 0.05) +
+  scale_fill_gradientn(
+    colors   = c("#F8FAFC", "#BAE6FD", "#0284C7", "#0C4A6E"),
+    values   = scales::rescale(c(0, 0.005, 0.05, 3.3)),
+    name     = "구급차 수\n(km² 당)",
+    na.value = "grey90"
+  ) +
+  labs(title    = "EDA | 면적당 구급차 수 분포",
+       subtitle = "빨간선: 수도권") +
+  theme_void() +
+  theme(plot.title      = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle   = element_text(color = "grey50", size = 10, hjust = 0.5),
+        legend.position = "right")
+
+# 지도 2 — 응급실 내 사망률 + 수도권 경계
+ggplot(map_joined) +
+  geom_sf(aes(fill = ami_dead),
+          color = "white", linewidth = 0.05) +
+  geom_sf(data = map_metro,
+          fill = NA, color = "#378ADD", linewidth = 0.05) +
+  scale_fill_gradientn(
+    colors   = c("#F8FAFC", "#FCA5A5", "#DC2626", "#7F1D1D"),
+    values   = scales::rescale(c(0, 0.5, 3, 15.4)),
+    name     = "사망률 (%)",
+    na.value = "grey90"
+  ) +
+  labs(title    = "EDA | 응급실 내 사망률 분포",
+       subtitle = "파란선: 수도권") +
+  theme_void() +
+  theme(plot.title      = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle   = element_text(color = "grey50", size = 10, hjust = 0.5),
+        legend.position = "right")
+
+
+
 # 정규성 검정
 shapiro.test(data$ami_dead) # p-value < 2.2e-16 : 정규분포 아님
 
@@ -391,9 +562,9 @@ data <- data %>%
 
 # 변환 후 분포 확인
 par(mfrow = c(1, 2))
-hist(data$log_ami_dead, main = "log(응급실 내 사망률 + 1)", col = "steelblue")
+hist(data$log_ami_dead, main = "응급실 내 사망률", col = "steelblue")
 boxplot(log_ami_dead ~ metro, data = data,
-        main = "log 사망률 (수도권 vs 비수도권)",
+        main = "사망률 (수도권 vs 비수도권)",
         col = c("#1D9E75", "#378ADD"))
 par(mfrow = c(1, 1))
 
@@ -448,29 +619,53 @@ summary(m_dead_nonmetro)
 ### 비수도권에서는 치료역량(입원치료, 전원율)이 응급실 내 사망률을 더 강하게 설명
 ### 즉, 비수도권에서 치료역량 개선이 응급실 내 사망률 감소에 더 직접적인 영향을 미침
 
-# 각 치료역량 변수 → log 사망률 산점도
+# 구급차 이용률 → 사망률
 data %>%
-  dplyr::select(log_ami_dead, ami_amb, ami_heal, ami_trans, metro) %>%
-  pivot_longer(cols = c(ami_amb, ami_heal, ami_trans),
-               names_to = "변수", values_to = "값") %>%
-  mutate(변수 = case_when(
-    변수 == "ami_amb"   ~ "구급차 이용률",
-    변수 == "ami_heal"  ~ "입원치료 제공률",
-    변수 == "ami_trans" ~ "전원율"
-  )) %>%
-  ggplot(aes(x = 값, y = log_ami_dead, color = metro)) +
-  geom_point(alpha = .4, size = 1.8) +
-  geom_smooth(method = "lm", se = TRUE, linewidth = 1) +
-  facet_wrap(~변수, scales = "free_x", ncol = 3) +
+  ggplot(aes(x = ami_amb, y = log_ami_dead, color = metro)) +
+  geom_point(alpha = .4, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1,
+              aes(group = metro)) +
   scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
-  labs(title    = "Step 4 | 치료역량 → 응급실 내 사망률",
+  labs(title    = "Step 4-1 | 구급차 이용률 → 응급실 내 사망률",
        subtitle = "수도권 vs 비수도권 — 선형 추세선 포함",
-       x = NULL, y = "log(응급실 내 사망률 + 1)", color = NULL) +
+       x = "구급차 이용률 (%)", y = "응급실 내 사망률",
+       color = NULL) +
   theme_minimal(base_size = 12) +
   theme(legend.position = "bottom",
         plot.title      = element_text(face = "bold", size = 13),
-        plot.subtitle   = element_text(color = "grey50"),
-        strip.text      = element_text(face = "bold"))
+        plot.subtitle   = element_text(color = "grey50"))
+
+# 입원치료 제공률 → 사망률
+data %>%
+  ggplot(aes(x = ami_heal, y = log_ami_dead, color = metro)) +
+  geom_point(alpha = .4, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1,
+              aes(group = metro)) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "Step 4-2 | 입원치료 제공률 → 응급실 내 사망률",
+       subtitle = "수도권 vs 비수도권 — 선형 추세선 포함",
+       x = "입원치료 제공률 (%)", y = "응급실 내 사망률",
+       color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"))
+
+# 전원율 → 사망률
+data %>%
+  ggplot(aes(x = ami_trans, y = log_ami_dead, color = metro)) +
+  geom_point(alpha = .4, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1,
+              aes(group = metro)) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  labs(title    = "Step 4-3 | 전원율 → 응급실 내 사망률",
+       subtitle = "수도권 vs 비수도권 — 선형 추세선 포함",
+       x = "전원율 (%)", y = "응급실 내 사망률",
+       color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"))
 
 # 핵심 결론
 # 치료역량 중 입원치료 제공률, 전원율이 응급실 내 사망률에 유의한 영향을 미침
@@ -507,6 +702,69 @@ med_result <- mediate(med_model, out_model,
                       sims     = 1000)
 summary(med_result)
 
+ggplot() +
+  # 노드
+  annotate("rect", xmin=0, xmax=2, ymin=1.7, ymax=2.3, fill="#DBEAFE", color="#2563EB") +
+  annotate("rect", xmin=4, xmax=6, ymin=2.7, ymax=3.3, fill="#DCFCE7", color="#0F6E56") +
+  annotate("rect", xmin=8, xmax=10, ymin=1.7, ymax=2.3, fill="#FEE2E2", color="#DC2626") +
+  # 텍스트
+  annotate("text", x=1, y=2, label="인프라\n(병원 면적당)", size=3.5, fontface="bold") +
+  annotate("text", x=5, y=3, label="입원치료\n제공률", size=3.5, fontface="bold") +
+  annotate("text", x=9, y=2, label="응급실 내\n사망률", size=3.5, fontface="bold") +
+  # a경로 (인프라→입원치료)
+  annotate("segment", x=2, xend=4, y=2.2, yend=2.8,
+           arrow=arrow(length=unit(0.3,"cm")), color="#0F6E56", linewidth=1) +
+  annotate("text", x=3, y=2.65, label="a경로 (비유의)", size=3, color="#6B7280") +
+  # b경로 (입원치료→사망률)
+  annotate("segment", x=6, xend=8, y=2.8, yend=2.2,
+           arrow=arrow(length=unit(0.3,"cm")), color="#0F6E56", linewidth=1) +
+  annotate("text", x=7, y=2.65, label="b경로 (유의***)", size=3, color="#0F6E56", fontface="bold") +
+  # c'경로 (직접효과)
+  annotate("segment", x=2, xend=8, y=1.9, yend=1.9,
+           arrow=arrow(length=unit(0.3,"cm")), color="#6B7280", linewidth=1, linetype="dashed") +
+  annotate("text", x=5, y=1.7, label="직접효과 c' (비유의)", size=3, color="#6B7280") +
+  # 간접효과 표시
+  annotate("text", x=5, y=1.2,
+           label="간접효과 (ACME) = −0.393  p=0.016 *",
+           size=3.5, color="#2563EB", fontface="bold") +
+  xlim(-0.5, 11) + ylim(0.8, 3.8) +
+  labs(title    = "Step 5 | 매개효과 경로도",
+       subtitle = "인프라 → 입원치료(매개) → 응급실 내 사망률") +
+  theme_void() +
+  theme(plot.title    = element_text(face="bold", size=13, hjust=0.5),
+        plot.subtitle = element_text(color="grey50", size=10, hjust=0.5))
+
+# ACME 비교 플롯 — 전체 / 수도권 / 비수도권
+med_plot_df <- data.frame(
+  그룹     = c("전체", "수도권", "비수도권"),
+  ACME     = c(-0.393, -0.224, -0.363),
+  CI_lower = c(-0.718, -0.593, -0.932),
+  CI_upper = c(-0.063,  0.063,  0.063),
+  p값      = c("p=0.016 *", "p=0.146", "p=0.094 ."),
+  유의     = c("유의", "비유의", "경계선")
+) %>%
+  mutate(그룹 = factor(그룹, levels = c("전체", "수도권", "비수도권")))
+
+ggplot(med_plot_df, aes(x = 그룹, y = ACME,
+                        ymin = CI_lower, ymax = CI_upper,
+                        color = 유의)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_errorbar(width = .15, linewidth = 1) +
+  geom_point(size = 5) +
+  geom_text(aes(label = paste0("ACME = ", ACME, "\n", p값)),
+            vjust = -1.2, size = 3.5, color = "grey30") +
+  scale_color_manual(values = c("유의"   = "#378ADD",
+                                "경계선" = "#EF9F27",
+                                "비유의" = "#B4B2A9")) +
+  ylim(-1.2, 0.5) +
+  labs(title    = "Step 5 | 매개효과(ACME) 비교",
+       subtitle = "인프라 → 입원치료 → 응급실 내 사망률 간접효과 (Bootstrap 95% CI)",
+       x = NULL, y = "간접효과 (ACME)", color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"))
+
 # ACME (간접효과) : -0.393  p = 0.016 * 유의
 #   인프라 → 입원치료 → 응급실 내 사망률 매개경로 존재
 #   인프라↑ → 입원치료↑ → log(응급실 내 사망률)↓
@@ -525,7 +783,7 @@ summary(med_result)
 # 단, 전체효과와 매개비율은 비유의
 # → "인프라 → 입원치료 → 사망률" 간접 경로는 확인되나
 #    전체적인 인프라의 사망률 영향은 불확실
-# → 매개경로가 존재하지만 강도가 약하다는 보수적 해석이 적절
+# → 매개경로가 존재하지만 강도가 약하다
 
 # 수도권 매개효과
 med_model_metro <- lm(ami_heal ~ infra_hospital_per_area + infra_amb_per_area + region_old,
@@ -575,14 +833,14 @@ summary(med_nonmetro)
 
 # ami_heal, ami_trans를 개선했을 때 사망률이 얼마나 감소하는지 예측
 
-# 비수도권 시나리오
+# 비수도권 시나리오 수정
 sim_nonmetro <- data.frame(
-  시나리오   = c("현재", "ami_heal +5%", "ami_heal +10%",
+  시나리오   = c("현재", "ami_heal +1%", "ami_heal +2%",
              "ami_trans -1%", "ami_trans -2%"),
   ami_amb    = mean(data_nonmetro$ami_amb),
   ami_heal   = c(mean(data_nonmetro$ami_heal),
-                 mean(data_nonmetro$ami_heal) + 5,
-                 mean(data_nonmetro$ami_heal) + 10,
+                 mean(data_nonmetro$ami_heal) + 1,
+                 mean(data_nonmetro$ami_heal) + 2,
                  mean(data_nonmetro$ami_heal),
                  mean(data_nonmetro$ami_heal)),
   ami_trans  = c(mean(data_nonmetro$ami_trans),
@@ -593,14 +851,14 @@ sim_nonmetro <- data.frame(
   region_old = mean(data_nonmetro$region_old)
 )
 
-# 수도권 시나리오
+# 수도권 시나리오 수정
 sim_metro <- data.frame(
-  시나리오   = c("현재", "ami_heal +5%", "ami_heal +10%",
+  시나리오   = c("현재", "ami_heal +1%", "ami_heal +2%",
              "ami_trans -1%", "ami_trans -2%"),
   ami_amb    = mean(data_metro$ami_amb),
   ami_heal   = c(mean(data_metro$ami_heal),
-                 mean(data_metro$ami_heal) + 5,
-                 mean(data_metro$ami_heal) + 10,
+                 mean(data_metro$ami_heal) + 1,
+                 mean(data_metro$ami_heal) + 2,
                  mean(data_metro$ami_heal),
                  mean(data_metro$ami_heal)),
   ami_trans  = c(mean(data_metro$ami_trans),
@@ -611,7 +869,7 @@ sim_metro <- data.frame(
   region_old = mean(data_metro$region_old)
 )
 
-# 사망률 예측 후 역변환 (log → 원래 단위)
+# 사망률 예측 후 역변환
 sim_nonmetro$예측사망률 <- round(
   exp(predict(m_dead_nonmetro, newdata = sim_nonmetro)) - 1, 4)
 sim_metro$예측사망률    <- round(
@@ -622,22 +880,44 @@ sim_nonmetro$그룹 <- "비수도권"
 sim_metro$그룹    <- "수도권"
 sim_all <- rbind(sim_nonmetro, sim_metro)
 
-# 시나리오 순서 고정
-sim_all$시나리오 <- factor(sim_all$시나리오,
-                       levels = c("현재", "ami_heal +5%", "ami_heal +10%",
-                                  "ami_trans -1%", "ami_trans -2%"))
-
 # 선그래프
-ggplot(sim_all, aes(x = 시나리오, y = 예측사망률,
-                    color = 그룹, group = 그룹)) +
+# 입원치료 제공률 개선 시나리오
+sim_all %>%
+  filter(시나리오 %in% c("현재", "ami_heal +1%", "ami_heal +2%")) %>%
+  mutate(시나리오 = factor(시나리오,
+                       levels = c("현재", "ami_heal +1%", "ami_heal +2%"))) %>%
+  ggplot(aes(x = 시나리오, y = 예측사망률,
+             color = 그룹, group = 그룹)) +
   geom_line(linewidth = 1.2) +
   geom_point(size = 4) +
   geom_text(aes(label = paste0(예측사망률, "%")),
             vjust = -1, size = 3.5) +
   scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
   ylim(0, max(sim_all$예측사망률) * 1.15) +
-  labs(title    = "Step 6 | 치료역량 개선 시뮬레이션",
-       subtitle = "수도권 vs 비수도권 — 시나리오별 예측 사망률 변화",
+  labs(title    = "Step 6-1 | 입원치료 제공률 개선 시뮬레이션",
+       subtitle = "입원치료 제공률 개선 시 예측 사망률 변화",
+       x = NULL, y = "예측 사망률 (%)", color = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom",
+        plot.title      = element_text(face = "bold", size = 13),
+        plot.subtitle   = element_text(color = "grey50"),
+        axis.text.x     = element_text(size = 10))
+
+# 전원율 시나리오
+sim_all %>%
+  filter(시나리오 %in% c("현재", "ami_trans -1%", "ami_trans -2%")) %>%
+  mutate(시나리오 = factor(시나리오,
+                       levels = c("현재", "ami_trans -1%", "ami_trans -2%"))) %>%
+  ggplot(aes(x = 시나리오, y = 예측사망률,
+             color = 그룹, group = 그룹)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 4) +
+  geom_text(aes(label = paste0(예측사망률, "%")),
+            vjust = -1, size = 3.5) +
+  scale_color_manual(values = c("수도권" = "#378ADD", "비수도권" = "#1D9E75")) +
+  ylim(0, max(sim_all$예측사망률) * 1.15) +
+  labs(title    = "Step 6-2 | 전원율 시뮬레이션",
+       subtitle = "전원율 감소 시 예측 사망률 변화 — 억제 시 역효과 확인",
        x = NULL, y = "예측 사망률 (%)", color = NULL) +
   theme_minimal(base_size = 12) +
   theme(legend.position = "bottom",
@@ -646,18 +926,19 @@ ggplot(sim_all, aes(x = 시나리오, y = 예측사망률,
         axis.text.x     = element_text(size = 10))
 
 # ami_heal 개선 시
-# +5%  → 비수도권 1.1165% → 0.2654% (약 76% 감소)
-# +10% → 거의 0에 수렴
-# → 입원치료 제공률 개선이 응급실 내 사망률에 매우 강력한 효과
+# +1%  → 비수도권 1.1165% → 0.9066% (약 18.8% 감소)
+# +2%  → 비수도권 1.1165% → 0.7175% (약 35.7% 감소)
+# → 입원치료 제공률 소폭 개선만으로도 응급실 내 사망률 감소 효과 확인
 
 # ami_trans 개선 시 (전원율 감소)
 # -1% → 오히려 사망률 증가 (1.1165% → 1.3458%)
 # -2% → 더 증가 (1.60%)
 # → 전원율을 억지로 낮추면 역효과
-# → 전원은 필요한 과정 — 낮추는 게 목표가 아님
+# → 전원은 필요한 의료적 판단 과정 — 낮추는 것이 목표가 아님
 
 # 수도권 vs 비수도권
 # 두 그룹 패턴 동일 → 치료역량 개선 효과는 지역 무관하게 일관됨
+
 
 ################################################################################
 ################################################################################
@@ -697,3 +978,112 @@ ggplot(sim_all, aes(x = 시나리오, y = 예측사망률,
 # 6. 수도권/비수도권 이분법의 단순화
 #    수도권 내에서도 지역 간 차이 존재 (서울 vs 경기 외곽)
 #    비수도권도 광역시와 농촌 지역을 동일하게 취급 → 세부 격차 반영 못함
+
+####################
+### 추가 시각화
+
+# "단순히 비수도권이 취약한 게 아니라, 가장 응급의료가 필요한 사람들이 사는 곳에 인프라가 가장 없다"
+# 고령화율 높음 → 심근경색 등 응급상황 발생 가능성 높음
+# +
+#   면적당 인프라 낮음 → 응급상황 발생 시 인프라 도달 시간 김
+# ↓
+# 이중으로 취약한 지역 = 가장 위험한 지역
+
+# 단순히 전국에 인프라를 고르게 늘리거나 비수도권에 막연하게 늘리는게 아니라,
+# 이중 취약 지역에 선택적으로 집중 투자해야 한다는 근거
+# 어디에 먼저 투자해야 하는가?에 대한 시각화
+
+# 고령화율 상위 25% + 인프라 하위 25% → 이중 취약 지역
+map_joined <- map_joined %>%
+  mutate(
+    이중취약 = case_when(
+      region_old >= quantile(region_old, 0.75, na.rm = TRUE) &
+        infra_hospital_per_area <= quantile(infra_hospital_per_area, 0.25, na.rm = TRUE) ~ "이중 취약 지역",
+      TRUE ~ "일반 지역"
+    )
+  )
+
+# 이중 취약 지역 지도
+ggplot(map_joined) +
+  geom_sf(aes(fill = 이중취약), color = "white", linewidth = 0.01) +
+  geom_sf(data = map_metro,
+          fill = NA, color = "#FF4444", linewidth = 0.05) +
+  scale_fill_manual(
+    values = c("이중 취약 지역" = "#7F1D1D", "일반 지역" = "#DBEAFE"),
+    na.value = "grey90",
+    name = NULL
+  ) +
+  labs(title    = "고령화율 높고 인프라 접근성 낮은 이중 취약 지역",
+       subtitle = "고령화율 상위 25% + 면적당 병원 수 하위 25% / 빨간선: 수도권") +
+  theme_void() +
+  theme(plot.title      = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle   = element_text(color = "grey50", size = 10, hjust = 0.5),
+        legend.position = "right")
+
+# 우선순위 투자 지역 분류
+map_joined <- map_joined %>%
+  mutate(
+    우선순위 = case_when(
+      이중취약 == "이중 취약 지역" & ami_dead >= median(ami_dead, na.rm = TRUE) ~ "최우선 투자 지역",
+      이중취약 == "이중 취약 지역" & ami_dead < median(ami_dead, na.rm = TRUE)  ~ "우선 투자 지역",
+      TRUE ~ "일반 지역"
+    )
+  )
+
+# 우선순위 투자 지역 지도
+ggplot(map_joined) +
+  geom_sf(aes(fill = 우선순위), color = "white", linewidth = 0.05) +
+  geom_sf(data = map_metro,
+          fill = NA, color = "#FF4444", linewidth = 0.05) +
+  scale_fill_manual(
+    values = c("최우선 투자 지역" = "#7F1D1D",
+               "우선 투자 지역"   = "#FCA5A5",
+               "일반 지역"        = "#DBEAFE"),
+    na.value = "grey90",
+    name = NULL
+  ) +
+  labs(title    = "정책 제언 | 응급의료 인프라 투자 우선순위 지역",
+       subtitle = "진한 빨강: 최우선 (이중취약 + 사망률 높음) / 연한 빨강: 우선 (이중취약) / 빨간선: 수도권") +
+  theme_void() +
+  theme(plot.title      = element_text(face = "bold", size = 13, hjust = 0.5),
+        plot.subtitle   = element_text(color = "grey50", size = 9, hjust = 0.5),
+        legend.position = "right")
+
+# 목록 확인
+map_joined %>%
+  st_drop_geometry() %>%
+  filter(이중취약 == "이중 취약 지역") %>%
+  dplyr::select(sido_nm, SIG_KOR_NM, region_old,
+                infra_hospital_per_area, ami_dead) %>%
+  arrange(desc(ami_dead)) %>%
+  rename(시도 = sido_nm, 시군구 = SIG_KOR_NM,
+         고령화율 = region_old,
+         병원접근성 = infra_hospital_per_area,
+         사망률 = ami_dead)
+
+# 상관행렬 시각화 - 모든 변수 간 관계 한눈에
+data %>%
+  dplyr::select(infra_hospital_per_area, infra_amb_per_area,
+         ami_amb, ami_heal, ami_trans, ami_dead, region_old) %>%
+  cor(use = "complete.obs", method = "spearman") %>%
+  ggcorrplot(method = "square", type = "lower",
+             lab = TRUE, lab_size = 3)
+
+# 강한 관계
+# ami_heal ↔ ami_trans : -0.73  강한 음의 상관
+#   → 입원치료 제공률이 높을수록 전원율이 낮음
+#   → 자체 처리 역량이 높으면 전원할 필요가 없다는 해석
+
+# 중간 관계
+# infra_hospital_per_area ↔ infra_amb_per_area : +0.53
+#   → 병원과 구급차 인프라는 함께 몰려 있음 (수도권)
+# infra_amb_per_area ↔ region_old : -0.53
+#   → 고령화율 높을수록 구급차 접근성 낮음 (Step 2 결과와 일치)
+# infra_hospital_per_area ↔ region_old : -0.47
+#   → 고령화율 높을수록 병원 접근성 낮음 (Step 2 결과와 일치)
+
+# 약한 관계 (주목)
+# 인프라 ↔ ami_dead : -0.17, 0.01
+#   → 인프라와 사망률 관계 매우 약함 → Step 3 결과와 일치
+# ami_heal ↔ ami_dead : -0.34
+#   → 입원치료↑ 사망률↓ → Step 4 결과와 일치
